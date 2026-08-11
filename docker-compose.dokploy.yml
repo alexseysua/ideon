@@ -1,0 +1,67 @@
+# Dokploy deployment.
+#
+# Unlike docker-compose.yml, this builds the image from this repository instead of
+# pulling ghcr.io/3xpyth0n/ideon — required so that fork-local changes (the Ukrainian
+# locale in src/app/i18n/uk.json) end up in the running container.
+#
+# Traefik terminates TLS and routes to ideon-app:3000 over dokploy-network, so no
+# host ports are published. Environment values come from the Dokploy Environment tab.
+
+services:
+  ideon-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      APP_PORT: 3000
+      APP_URL: ${APP_URL}
+      TIMEZONE: ${TIMEZONE:-Europe/Kyiv}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_HOST: ideon-db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      SECRET_KEY: ${SECRET_KEY}
+    depends_on:
+      ideon-db:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ideon-app-data:/app/storage
+    networks:
+      - dokploy-network
+      - ideon-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ideon-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    restart: unless-stopped
+    volumes:
+      - ideon-db-data:/var/lib/postgresql/data
+    networks:
+      - ideon-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ideon-app-data:
+  ideon-db-data:
+
+networks:
+  dokploy-network:
+    external: true
+  ideon-internal:
